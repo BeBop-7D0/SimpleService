@@ -5,12 +5,14 @@ from sanic import json
 from sanic import Request
 
 from app.utils.common import is_valid_url
+from app.db.repository import TaskRepository
+from sqlalchemy.ext.asyncio import AsyncSession
 
 tasks_bp = Blueprint("Task_blueprint", "tasks")
 
 
 @tasks_bp.post("")
-async def safe_tasks(request: Request) -> json:
+async def safe_urls(request: Request) -> json:
     request_body: dict = request.json
     urls = request_body.get("urls", [])
     if not isinstance(urls, list):
@@ -22,27 +24,24 @@ async def safe_tasks(request: Request) -> json:
             status=400
         )
 
-    success_count, failed_list = await process_urls(urls)
+    filtered_urls = list(filter(is_valid_url, urls))
+
+    factory = request.app.ctx.db_session_factory
+    session: AsyncSession
+
+    async with factory() as session:
+        repo = TaskRepository(session)
+        success, failed = await repo.create_task(filtered_urls)
+
+        if not success and failed:
+            await session.rollback()
+        else:
+            await session.commit()
 
     status = 200
     body = {
-        "success_count": success_count,
-        "failed_to_process": failed_list
+        "success": success,
+        "failed": failed
     }
     return json(body,  status)
 
-
-
-async def process_urls(urls: List[str]) -> (int, List[str]):
-    success_count = 0
-    failed_list = []
-
-    for url in urls:
-        if is_valid_url(url):
-            # TODO: сохранить в бд
-            success_count += 1
-            pass
-        else:
-            failed_list.append(url)
-
-    return success_count, failed_list
